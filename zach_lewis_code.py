@@ -1,8 +1,8 @@
 import pandas as pd
-import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 import spotipy
 import spotipy.util as util
-from spotipy.oauth2 import SpotifyClientCredentials
 from sklearn.preprocessing import StandardScaler
 from pyod.models.knn import KNN
 
@@ -59,7 +59,7 @@ new_artists = [x for x in new_artists if x not in artist_ids]  # This removed 8 
 
 # To do this, I will get the top songs from the artists and create a data frame for the audio features of each song.
 # Then, I will do the same for all the artists in the new artist list and combine the data frames. Then, I will use
-# an anomaly detection method in python through pyOD. This will basically cluster the songs and find a group of outlier
+# a KNN anomaly detection method in python through pyOD. This will basically group the songs and find a group of outlier
 # songs. I will cut these songs out of the data and assume that all of the songs left are most similar to the group of
 # songs from my favorite artists. Then, I will use this set of new songs that were found to be similar to the top
 # songs of my favorite artists to create a playlist for listening to new music.
@@ -96,7 +96,7 @@ for track_chunk in [new_tracks[i:i + 20] for i in range(0, len(new_tracks), 20)]
     new_features = new_features.append(pd.DataFrame(sp.audio_features(track_chunk)))
 
 # I want to add a column to both data frames indicating whether they belong to a favorite artist or a new artist
-# NOTE: This column will later become an index so that it is not used in the clustering process
+# NOTE: This column will later become an index so that it is not used in the KNN anomaly detection process
 fav_features['type'] = 'fav'
 new_features['type'] = 'new'
 
@@ -130,17 +130,45 @@ features['decision_score'] = clf.decision_scores_
 # Reset the index to identify songs by URI and type (fav/new)
 features.reset_index(inplace=True)
 
-# Get a subset of the features for songs from my favorite artists
-fav = features[features['type'] == 'fav']
-
 # Subset the features to only contain songs by new artists
 features = features[features['type'] == 'new']
 
 # Sort observations by ascending decision score value and take only the top 100 songs to create my playlist
-features = features.nsmallest(100, 'decision_score')
-songs = features['uri']
+songs = features.nsmallest(100, 'decision_score')
 
-# Create a playlist of the 100 new songs I identified through my analysis
+# Create a data frame of new songs excluded from the playlist
+excluded = features[~features.index.isin(songs.index)]
+
+# How do the selected songs compare to the original favorite songs in terms of audio features?
+# How do both of these distributions compare to the new songs that I excluded from my final list of songs?
+# Compare the distributions for three variables I care the most about: acousticness, instrumentalness, and liveness
+sns.distplot(songs['acousticness'], color='red', label='Acousticness for new songs chosen for playlist')
+sns.distplot(excluded['acousticness'], color='blue', label='Acousticness for new songs excluded from playlist')
+sns.distplot(fav_features['acousticness'], color='green', label='Acousticness for songs from my 10 favorite artists')
+plt.legend()
+# For acousticness, I notice a significant tail in the excluded distribution, while the distribution of selected songs
+# closely follows the distribution of the original favorite songs. This is good for the analysis and means that the
+# songs I have selected are similar overall in terms of acousticness to my favorite songs.
+
+sns.distplot(songs['instrumentalness'], color='red', label='Acousticness for new songs chosen for playlist')
+sns.distplot(excluded['instrumentalness'], color='blue', label='Acousticness for new songs excluded from playlist')
+sns.distplot(fav_features['instrumentalness'], color='green', label='Acousticness for songs from 10 favorite artists')
+plt.legend()
+# This plot is hard to distinguish any distribution. Instrumentalness has really small values and may not have been
+# significant in the KNN process.
+
+sns.distplot(songs['liveness'], color='red', label='Acousticness for new songs chosen for playlist')
+sns.distplot(excluded['liveness'], color='blue', label='Acousticness for new songs excluded from playlist')
+sns.distplot(fav_features['liveness'], color='green', label='Acousticness for songs from 10 favorite artists')
+plt.legend()
+# Overall, it looks like the selected songs closely follows the distribution for my favorite songs. The distribution of
+# excluded songs also follows closely as well but there is a significant portion of outliers in the right tail, which
+# indicates that some outliers in terms of liveness were excluded from the selected playlist.
+
+# This list of 100 songs will be used to create my new music playlist
+songs = songs['uri']
+
+# Create a playlist of the 100 new songs I identify from analysis
 playlist_name = 'New Music for Zach Lewis'
 playlist_description = 'Top 100 songs most similar to the best of my favorite Texas/Red Dirt Country artists'
 playlist_json = sp.user_playlist_create(SPOTIFY_USER_ID, playlist_name)
